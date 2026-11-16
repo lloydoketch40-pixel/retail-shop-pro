@@ -1,0 +1,65 @@
+retail shop proretailops
+Core logic for a retail back office: inventory, pricing, orders, POS cash, payments, and settlement reconciliation. Python 3.12. No dependencies. Storage is SQLite through the standard library. All SQL is plain.
+Run the tests
+python3 -m unittest discover -s tests
+The tests also run under pytest.
+Modules
+Module
+inventory
+pricing
+catalog
+orders
+payments
+pos
+reconciliation
+db
+Job
+Stock ledger. Receive, adjust, cycle count, transfer, reserve, release, ship, restock. audit() checks stock against the ledger.
+Pure engine. Percent off, order-level amount off, buy X get Y. Priority, exclusive promotions, tax inclusive or exclusive.
+Locations, SKUs, tax classes, promotions with time windows.
+Order state machine, place, fulfil, cancel, partial returns.
+Split tender, cash change, refunds, refund confirmation.
+Cash shifts. Open, close, variance.
+Match card payments against a provider settlement batch.
+Connection, nested transactions, idempotency.
+Rules the code enforces
+Money is integer minor units. Rates are basis points. Rounding is half-up per line, so lines always add up to the total.
+No oversell. Every stock change is one guarded UPDATE. The database also has CHECK constraints. A concurrency test with 12 threads and 5 units proves it.
+Append-only ledger. Triggers block UPDATE and DELETE on inventory_ledger.
+Idempotency. Every mutating call takes a key (order ids are the key for place_order). A retry returns the stored first result. The same key with a different request raises IdempotencyConflict. Failed calls store nothing and can be retried.
+Atomic. Each operation is one transaction. A failure in any step, such as the stock reservation, rolls back the whole operation.
+State guards. Every status change is a WHERE status IN (...) update. A stale or repeated request raises InvalidTransition.
+Prices come from the catalog. The caller sends SKUs and quantities only.
+Refunds add up. Partial returns use cumulative rounding, so the sum of all refunds for an order equals what the customer paid.
+Cash needs an open shift. Expected cash is opening float plus cash sales minus cash refunds.
+Refund flow
+cancel and return_items create refund rows. Cash refunds are confirmed at once. Card refunds are pending. Your code sends each pending refund to the payment provider, then calls payments.confirm_refund(payment_id, provider_ref). The provider call stays outside the database transaction on purpose.
+Errors
+Error
+ValidationError
+NotFound
+InsufficientStock
+InvalidTransition
+IdempotencyConflict
+PaymentError
+Meaning
+Bad input or broken business rule
+Unknown order, SKU, location, shift
+Not enough available stock
+Wrong state for this action
+Key reused with another request
+Overpayment, refund too large, duplicate provider ref
+Suggested HTTP status
+422
+404
+409
+409
+409
+422
+Known limits
+shortcut: transfers move stock in one step. Add an in-transit state if transfers take days.
+shortcut: reconciliation dates use UTC. Add a business-date column if stores close at local midnight.
+shortcut: promotions are automatic. There are no coupon codes or per-customer limits.
+shortcut: one currency per order. There is no conversion.
+SQLite allows one writer at a time. BEGIN IMMEDIATE makes this safe. For high write volume, port db.py to Postgres: change the placeholders to %s or $n, use SELECT ... FOR UPDATE where a row is read before a guarded update, and keep the guarded UPDATE statements as they are.
+No HTTP layer is included. Wrap these functions in your web framework and map the errors with the table above. 
